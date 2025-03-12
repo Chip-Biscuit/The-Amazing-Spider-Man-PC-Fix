@@ -8,6 +8,8 @@ You must run the ASMLauncher.exe file and set all the graphics settings you want
 
 Go to releases and download the latest TheAmazingSpiderMan.zip, extract the ASM-1-FPS-Patcher.exe, d3d9.dll and d3d9.ini files into your game folder next to the Game.exe file and you are good to go! You can edit the settings you wish to use in the d3d9.ini file.
 
+You will need to run the patcher program only once on a fresh/ clean installation of the game this will uncap fps to 360 perminantly then you can play the game normally.
+
 # Resolution/Aspect Ratio
 
 The default for resolution is set to (1920 x 1080) in the d3d9.ini file. Put the resolution that you wish to use in both the Width and Height area.
