@@ -24,7 +24,7 @@ Once you have used the patcher you can then edit the FPS inside of the d3d9.ini 
 
 The default for FOV is option (3). You can choose either 1,2 or 3 in the d3d9.ini file and each option will increase the FOV in game. If you wish to use the original FOV then simply don’t press the hotkey when playing the game.
 
-The game will start with the original FOV by default and when in game you can press the ‘mouse button 2’ key or whatever hotkey you have chosen in the [hotkey]keycodes.txt file to toggle between the original and new FOV setting.
+The game will start with the original FOV by default and when in game you can press the ‘mouse button 2’ which is the default key or whatever hotkey you have chosen in the [hotkey]keycodes.txt file and pasted into d3d9.ini to toggle between the original and new FOV setting.
 
 General note – FOV in this game is very buggy and can break in many areas of the game in particular shadows, terrain, the phone etc so it is advised to only use this for trying it out or fun as it stands.
 
