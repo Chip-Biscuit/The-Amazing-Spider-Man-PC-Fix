@@ -1,5 +1,7 @@
 # The-Amazing-Spider-Man-PC-Fix
 
+![ezgif com-animated-gif-maker](https://github.com/user-attachments/assets/1e25daed-7274-4dba-87c0-0dca2efe4823)
+
 # Requirements before using fix
 
 You must run the ASMLauncher.exe file and set all the graphics settings you want first (Resolution option here doesn’t matter so pick whatever you want) and launch the game once so these settings are applied. If the ASMLauncher.exe has a memory issue, then simple close the launcher and delete the file VideoDetection.dll so there is no video memory issue anymore. Once you have done all of this and all graphic options you want are set then you will no longer need to run the game via the ASMLauncher.exe anymore and can use game.exe instead.
