@@ -20,7 +20,7 @@ Resolution and aspect ratio edits are done together so you will only have to cho
 
 Before changing FPS inside of the d3d9.ini file you will need to run the ASM-1-FPS-Patcher.exe once which will patch the areas needed to uncap FPS to 360 max. Once you run this once you do not need to run this again. There is a possibility this file may flag on anti-virus due to the edits that it needs to make to the game, this is a false flag, and you will need to add this to the exception list for your anti-virus.
 
-Once you have used the patcher you can then edit the FPS inside of the d3d9.ini file. The default for FPS is (0) which is uncapped. The max FPS you can go to is 360. You can change it as you wish or fully uncap it to 360 with (0) with the FPSLimit option in the d3d9.ini file.
+Once you have used the patcher you can then edit the FPS inside of the d3d9.ini file. Default for FPS cap is 60 you can set the game to play at the FPS you wish in d3d9.ini for example 30, 60, 120 with a maximum of 360 FPS.
 
 # FOV
 
