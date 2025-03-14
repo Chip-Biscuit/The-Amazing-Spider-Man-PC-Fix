@@ -8,7 +8,7 @@ You must run the ASMLauncher.exe file and set all the graphics settings you want
 
 # Instructions
 
-Go to releases and download the latest TheAmazingSpiderMan.zip, extract the ASM-1-FPS-Patcher.exe, d3d9.dll and d3d9.ini files into your game folder next to the Game.exe file and you are good to go! You can edit the settings you wish to use in the d3d9.ini file.
+Go to releases and download the latest TheAmazingSpiderMan.zip, extract d3d9.dll and d3d9.ini files into your game folder next to the Game.exe file and you are good to go! You can edit the settings you wish to use in the d3d9.ini file.
 
 # Resolution/Aspect Ratio
 
@@ -18,9 +18,7 @@ Resolution and aspect ratio edits are done together so you will only have to cho
 
 # FPS
 
-Before changing FPS inside of the d3d9.ini file you will need to run the ASM-1-FPS-Patcher.exe once which will patch the areas needed to uncap FPS to 360 max. Once you run this once you do not need to run this again. There is a possibility this file may flag on anti-virus due to the edits that it needs to make to the game, this is a false flag, and you will need to add this to the exception list for your anti-virus.
-
-Once you have used the patcher you can then edit the FPS inside of the d3d9.ini file. Default for FPS cap is 60 you can set the game to play at the FPS you wish in d3d9.ini for example 30, 60, 120 with a maximum of 360 FPS.
+FPS is currently being worked on in this game, please keep an eye out for new updates on GitHub which could contain FPS patches for the game.
 
 # FOV
 
