@@ -78,11 +78,11 @@ int customHotkeyfps; //chip
 DWORD WINAPI HotkeyThread(LPVOID lpParam);
 
 
-char WinDir[MAX_PATH+1];
+char WinDir[MAX_PATH + 1];
 
 // List of registered window classes and procedures
 // WORD classAtom, ULONG_PTR WndProcPtr
-std::vector<std::pair<WORD,ULONG_PTR>> WndProcList;
+std::vector<std::pair<WORD, ULONG_PTR>> WndProcList;
 
 
 //=======================================================================================================================================================================================
@@ -242,76 +242,120 @@ void PerformHexEdits3() {
 //=======================================================================================================================================================================================
 
 //=======================================================================================================================================================================================
-//chip - window mode
+// chip - window mode
+//
+// Notes:
+// - Fixes GetDllPath off-by-one bug.
+// - Uses RegCreateKeyEx when writing (creates the key if missing).
+// - Assumes INI key "WindowedMode" means 1 = windowed, 0 = fullscreen,
+//   so we write Fullscreen = !WindowedMode (i.e. invert the INI boolean).
+//=======================================================================================================================================================================================
 
 // Function to read the window mode setting from the registry
+// Returns true if Fullscreen != 0, false if Fullscreen == 0 or on error.
 bool GetWindowModeSetting()
 {
-    HKEY hKey;
+    HKEY hKey = NULL;
     DWORD dwValue = 0;
-    DWORD dwSize = sizeof(DWORD);
+    DWORD dwSize = sizeof(dwValue);
+    DWORD dwType = 0;
 
-    if (RegOpenKeyEx(HKEY_CURRENT_USER, _T("SOFTWARE\\Activision\\Spider-Man (TM) SD\\Settings\\Display"), 0, KEY_READ, &hKey) == ERROR_SUCCESS)
-    {
-        if (RegQueryValueEx(hKey, _T("Fullscreen"), NULL, NULL, (LPBYTE)&dwValue, &dwSize) == ERROR_SUCCESS)
-        {
-            RegCloseKey(hKey);
-            return dwValue != 0;
-        }
-        RegCloseKey(hKey);
-    }
-    return false;
+    LONG res = RegOpenKeyEx(HKEY_CURRENT_USER,
+        _T("SOFTWARE\\Activision\\ASM\\Settings\\Display"),
+        0, KEY_READ, &hKey);
+    if (res != ERROR_SUCCESS)
+        return false;
+
+    res = RegQueryValueEx(hKey, _T("Fullscreen"), NULL, &dwType, (LPBYTE)&dwValue, &dwSize);
+    RegCloseKey(hKey);
+
+    if (res != ERROR_SUCCESS || dwType != REG_DWORD)
+        return false;
+
+    return (dwValue != 0);
 }
 
 // Function to set the window mode setting in the registry
-void SetWindowModeSetting(bool enable)
+// If enable == true -> writes Fullscreen = 1, else writes Fullscreen = 0.
+// Uses RegCreateKeyEx so the key is created if missing.
+bool SetWindowModeSetting(bool enable)
 {
-    HKEY hKey;
-    DWORD dwValue = enable ? 1 : 0;  // Correct logic: 1 for fullscreen, 0 for windowed
+    HKEY hKey = NULL;
+    DWORD dwDisposition = 0;
+    DWORD dwValue = enable ? 1 : 0;
 
-    if (RegOpenKeyEx(HKEY_CURRENT_USER, _T("SOFTWARE\\Activision\\Spider-Man (TM) SD\\Settings\\Display"), 0, KEY_WRITE, &hKey) == ERROR_SUCCESS)
-    {
-        RegSetValueEx(hKey, _T("Fullscreen"), 0, REG_DWORD, (const BYTE*)&dwValue, sizeof(DWORD));
-        RegCloseKey(hKey);
-    }
+    LONG res = RegCreateKeyEx(HKEY_CURRENT_USER,
+        _T("SOFTWARE\\Activision\\ASM\\Settings\\Display"),
+        0, NULL, REG_OPTION_NON_VOLATILE,
+        KEY_WRITE, NULL, &hKey, &dwDisposition);
+    if (res != ERROR_SUCCESS)
+        return false;
+
+    res = RegSetValueEx(hKey, _T("Fullscreen"), 0, REG_DWORD, (const BYTE*)&dwValue, sizeof(dwValue));
+    RegCloseKey(hKey);
+    return (res == ERROR_SUCCESS);
 }
 
 // Function to read the window mode setting from an INI file
+// Returns true if WindowedMode != 0
 bool ReadIniSetting(const TCHAR* iniFilePath)
 {
-    TCHAR result[10];
-    GetPrivateProfileString(_T("Settings"), _T("WindowedMode"), _T("0"), result, 10, iniFilePath);
+    TCHAR result[16] = { 0 };
+    GetPrivateProfileString(_T("Settings"), _T("WindowedMode"), _T("0"), result, (sizeof(result) / sizeof(result[0])), iniFilePath);
     return _ttoi(result) != 0;
 }
 
-// Function to get the path to the DLL
+// Robust function to get folder path of provided module (keeps trailing backslash)
 void GetDllPath(HMODULE hModule, TCHAR* dllPath, size_t size)
 {
-    GetModuleFileName(hModule, dllPath, size);
-    for (size_t i = _tcslen(dllPath); i > 0; --i)
+    // GetModuleFileName returns the length, or 0 on failure
+    DWORD len = GetModuleFileName(hModule, dllPath, (DWORD)size);
+    if (len == 0 || len >= size)
     {
-        if (dllPath[i] == '\\' || dllPath[i] == '/')
+        // fallback: empty string
+        if (size > 0) dllPath[0] = _T('\0');
+        return;
+    }
+
+    // walk backward from last character (len - 1) to find the last slash/backslash
+    for (size_t i = (size_t)len; i-- > 0; )
+    {
+        if (dllPath[i] == _T('\\') || dllPath[i] == _T('/'))
         {
-            dllPath[i + 1] = '\0';
-            break;
+            // keep the trailing slash and terminate after it
+            dllPath[i + 1] = _T('\0');
+            return;
         }
     }
+
+    // If not found, just terminate (no directory separator present)
+    dllPath[0] = _T('\0');
 }
 
 // Main function to be called when the DLL is injected
 void ToggleWindowMode(HMODULE hModule)
 {
-    TCHAR dllPath[MAX_PATH];
+    TCHAR dllPath[MAX_PATH] = { 0 };
     GetDllPath(hModule, dllPath, MAX_PATH);
 
+    // build path to d3d9.ini next to the DLL
     _tcscat_s(dllPath, MAX_PATH, _T("d3d9.ini"));
 
-    bool iniSetting = ReadIniSetting(dllPath);
-    SetWindowModeSetting(iniSetting);
+    // Read INI: WindowedMode -> true means "windowed"
+    bool iniWindowed = ReadIniSetting(dllPath);
+
+    // Map INI (WindowedMode) to registry Fullscreen value:
+    //   if INI says WindowedMode == 1  -> we want Fullscreen = 0
+    //   if INI says WindowedMode == 0  -> we want Fullscreen = 1
+    // Therefore invert the iniWindowed boolean.
+    bool fullscreenValue = !iniWindowed;
+
+    SetWindowModeSetting(fullscreenValue);
 }
 
-//chip - window mode
+// chip - window mode
 //=======================================================================================================================================================================================
+
 
 //=======================================================================================================================================================================================
 // chip resolution edit in registry 
@@ -384,6 +428,146 @@ void ToggleResolutionSettings(HMODULE hModule)
 
 //=======================================================================================================================================================================================
 
+//=======================================================================================================================================================================================
+// chip - aspect ratio (INI-driven)
+//
+// Reads AspectRatio from d3d9.ini and writes it to:
+// HKEY_CURRENT_USER\SOFTWARE\Activision\ASM\Settings\Display\AspectRatio
+// Default = 3. Value is clamped to 0..10 to avoid nonsense values.
+//=======================================================================================================================================================================================
+
+// Read AspectRatio from registry (unchanged helper, optional)
+DWORD GetAspectRatioSetting()
+{
+    HKEY hKey = NULL;
+    DWORD dwValue = 0;
+    DWORD dwSize = sizeof(DWORD);
+
+    if (RegOpenKeyEx(HKEY_CURRENT_USER, _T("SOFTWARE\\Activision\\ASM\\Settings\\Display"), 0, KEY_READ, &hKey) == ERROR_SUCCESS)
+    {
+        if (RegQueryValueEx(hKey, _T("AspectRatio"), NULL, NULL, (LPBYTE)&dwValue, &dwSize) == ERROR_SUCCESS)
+        {
+            RegCloseKey(hKey);
+            return dwValue;
+        }
+        RegCloseKey(hKey);
+    }
+    return 0;
+}
+
+// Write AspectRatio to registry (creates key if needed)
+bool ApplyAspectRatioToRegistry(DWORD dwValue)
+{
+    HKEY hKey = NULL;
+    DWORD dwDisposition = 0;
+
+    LONG res = RegCreateKeyEx(HKEY_CURRENT_USER,
+        _T("SOFTWARE\\Activision\\ASM\\Settings\\Display"),
+        0, NULL, REG_OPTION_NON_VOLATILE,
+        KEY_WRITE, NULL, &hKey, &dwDisposition);
+    if (res != ERROR_SUCCESS)
+        return false;
+
+    res = RegSetValueEx(hKey, _T("AspectRatio"), 0, REG_DWORD, (const BYTE*)&dwValue, sizeof(dwValue));
+    RegCloseKey(hKey);
+    return (res == ERROR_SUCCESS);
+}
+
+// Read AspectRatio from d3d9.ini and apply to registry.
+// If the INI is missing or value invalid, default to 3.
+void ToggleAspectRatio(HMODULE hModule)
+{
+    // Build path to d3d9.ini next to the DLL
+    TCHAR dllPath[MAX_PATH] = { 0 };
+    GetDllPath(hModule, dllPath, MAX_PATH);
+    _tcscat_s(dllPath, MAX_PATH, _T("d3d9.ini"));
+
+    // Read from INI: section "Settings", key "AspectRatio". Default = 3
+    int iniValue = GetPrivateProfileInt(_T("Settings"), _T("AspectRatio"), 3, dllPath);
+
+    // Clamp to a sane range (0..10). Adjust range if you want different limits.
+    if (iniValue < 0) iniValue = 0;
+    if (iniValue > 10) iniValue = 10;
+
+    // Apply to registry
+    bool ok = ApplyAspectRatioToRegistry(static_cast<DWORD>(iniValue));
+
+    // Small debug output (use DebugView or OutputDebugString)
+#ifdef _DEBUG
+    TCHAR dbg[256];
+    _stprintf_s(dbg, _countof(dbg), _T("ToggleAspectRatio: INI=%d -> REG=%d (ok=%d)\n"), iniValue, iniValue, ok ? 1 : 0);
+    OutputDebugString(dbg);
+#endif
+}
+
+//=======================================================================================================================================================================================
+
+//=======================================================================================================================================================================================
+// chip - shadows preset
+//=======================================================================================================================================================================================
+
+// Read ShadowsPreset (returns value, or 0 on error/missing)
+DWORD GetShadowsPresetSetting()
+{
+    HKEY hKey = NULL;
+    DWORD dwValue = 0;
+    DWORD dwSize = sizeof(dwValue);
+    DWORD dwType = 0;
+
+    if (RegOpenKeyEx(HKEY_CURRENT_USER,
+        _T("SOFTWARE\\Activision\\ASM\\GameConfig"),
+        0, KEY_READ, &hKey) == ERROR_SUCCESS)
+    {
+        if (RegQueryValueEx(hKey, _T("ShadowsPreset"), NULL, &dwType, (LPBYTE)&dwValue, &dwSize) == ERROR_SUCCESS)
+        {
+            if (dwType == REG_DWORD)
+            {
+                RegCloseKey(hKey);
+                return dwValue;
+            }
+        }
+        RegCloseKey(hKey);
+    }
+    return 0;
+}
+
+// Set ShadowsPreset to decimal 2 under:
+// HKEY_CURRENT_USER\Software\Activision\ASM\GameConfig\ShadowsPreset
+// Returns true on success.
+bool SetShadowsPresetTo2()
+{
+    HKEY hKey = NULL;
+    DWORD dwDisposition = 0;
+    DWORD dwValue = 2; // hard-coded value
+
+    LONG res = RegCreateKeyEx(
+        HKEY_CURRENT_USER,
+        _T("SOFTWARE\\Activision\\ASM\\GameConfig"),
+        0,
+        NULL,
+        REG_OPTION_NON_VOLATILE,
+        KEY_WRITE,
+        NULL,
+        &hKey,
+        &dwDisposition);
+
+    if (res != ERROR_SUCCESS)
+        return false;
+
+    res = RegSetValueEx(hKey, _T("ShadowsPreset"), 0, REG_DWORD, (const BYTE*)&dwValue, sizeof(dwValue));
+    RegCloseKey(hKey);
+    return (res == ERROR_SUCCESS);
+}
+
+// Main function to be called when the DLL is injected (keeps same signature as your other toggles)
+// This simply sets ShadowsPreset = 2 (no INI checks)
+void ToggleShadowsPreset(HMODULE /*hModule*/)
+{
+    SetShadowsPresetTo2();
+}
+
+// chip - shadows preset
+//=======================================================================================================================================================================================
 
 void HookModule(HMODULE hmod);
 LRESULT WINAPI CustomWndProcA(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lParam);
@@ -503,32 +687,32 @@ public:
         else
         {
             auto DrawTextOutline = [](ID3DXFont* pFont, FLOAT X, FLOAT Y, D3DXCOLOR dColor, CONST PCHAR cString, ...)
-            {
-                const D3DXCOLOR BLACK(D3DCOLOR_XRGB(0, 0, 0));
-                CHAR cBuffer[101] = "";
-
-                va_list oArgs;
-                va_start(oArgs, cString);
-                _vsnprintf((cBuffer + strlen(cBuffer)), (sizeof(cBuffer) - strlen(cBuffer)), cString, oArgs);
-                va_end(oArgs);
-
-                RECT Rect[5] =
                 {
-                    { X - 1, Y, X + 500.0f, Y + 50.0f },
-                    { X, Y - 1, X + 500.0f, Y + 50.0f },
-                    { X + 1, Y, X + 500.0f, Y + 50.0f },
-                    { X, Y + 1, X + 500.0f, Y + 50.0f },
-                    { X, Y, X + 500.0f, Y + 50.0f },
+                    const D3DXCOLOR BLACK(D3DCOLOR_XRGB(0, 0, 0));
+                    CHAR cBuffer[101] = "";
+
+                    va_list oArgs;
+                    va_start(oArgs, cString);
+                    _vsnprintf((cBuffer + strlen(cBuffer)), (sizeof(cBuffer) - strlen(cBuffer)), cString, oArgs);
+                    va_end(oArgs);
+
+                    RECT Rect[5] =
+                    {
+                        { X - 1, Y, X + 500.0f, Y + 50.0f },
+                        { X, Y - 1, X + 500.0f, Y + 50.0f },
+                        { X + 1, Y, X + 500.0f, Y + 50.0f },
+                        { X, Y + 1, X + 500.0f, Y + 50.0f },
+                        { X, Y, X + 500.0f, Y + 50.0f },
+                    };
+
+                    if (dColor != BLACK)
+                    {
+                        for (auto i = 0; i < 4; i++)
+                            pFont->DrawText(NULL, cBuffer, -1, &Rect[i], DT_NOCLIP, BLACK);
+                    }
+
+                    pFont->DrawText(NULL, cBuffer, -1, &Rect[4], DT_NOCLIP, dColor);
                 };
-
-                if (dColor != BLACK)
-                {
-                    for (auto i = 0; i < 4; i++)
-                        pFont->DrawText(NULL, cBuffer, -1, &Rect[i], DT_NOCLIP, BLACK);
-                }
-
-                pFont->DrawText(NULL, cBuffer, -1, &Rect[4], DT_NOCLIP, dColor);
-            };
 
             static char str_format_fps[] = "%02d";
             static char str_format_time[] = "%.01f ms";
@@ -644,23 +828,23 @@ void ForceWindowed(D3DPRESENT_PARAMETERS* pPresentationParameters, D3DDISPLAYMOD
                 uFlags |= SWP_NOMOVE;
         }
 
-        switch(nForceWindowStyle)
+        switch (nForceWindowStyle)
         {
-            case 1: // borderless fullscreen
-            case 4: // borderless window (no style)
-                lNewStyle = lOldStyle & ~(WS_CAPTION | WS_THICKFRAME | WS_MINIMIZE | WS_MAXIMIZE | WS_SYSMENU | WS_MINIMIZEBOX | WS_MAXIMIZEBOX | WS_DLGFRAME);
-                lNewStyle |= (lOldStyle & WS_CHILD) ? 0 : WS_POPUP;
-                lNewExStyle = lOldExStyle & ~(WS_EX_CONTEXTHELP | WS_EX_DLGMODALFRAME | WS_EX_CLIENTEDGE | WS_EX_STATICEDGE | WS_EX_WINDOWEDGE | WS_EX_TOOLWINDOW);
-                lNewExStyle |= WS_EX_APPWINDOW;
-                break;
-            case 2: // window
-                lNewStyle = (WS_OVERLAPPED | WS_CAPTION | WS_SYSMENU | WS_MINIMIZEBOX);
-                lNewExStyle = (WS_EX_APPWINDOW | WS_EX_WINDOWEDGE | WS_EX_CLIENTEDGE);
-                break;
-            case 3: // resizable window
-                lNewStyle = (WS_OVERLAPPED | WS_CAPTION | WS_SYSMENU | WS_MINIMIZEBOX | WS_THICKFRAME | WS_MAXIMIZEBOX);
-                lNewExStyle = (WS_EX_APPWINDOW | WS_EX_WINDOWEDGE | WS_EX_CLIENTEDGE);
-                break;
+        case 1: // borderless fullscreen
+        case 4: // borderless window (no style)
+            lNewStyle = lOldStyle & ~(WS_CAPTION | WS_THICKFRAME | WS_MINIMIZE | WS_MAXIMIZE | WS_SYSMENU | WS_MINIMIZEBOX | WS_MAXIMIZEBOX | WS_DLGFRAME);
+            lNewStyle |= (lOldStyle & WS_CHILD) ? 0 : WS_POPUP;
+            lNewExStyle = lOldExStyle & ~(WS_EX_CONTEXTHELP | WS_EX_DLGMODALFRAME | WS_EX_CLIENTEDGE | WS_EX_STATICEDGE | WS_EX_WINDOWEDGE | WS_EX_TOOLWINDOW);
+            lNewExStyle |= WS_EX_APPWINDOW;
+            break;
+        case 2: // window
+            lNewStyle = (WS_OVERLAPPED | WS_CAPTION | WS_SYSMENU | WS_MINIMIZEBOX);
+            lNewExStyle = (WS_EX_APPWINDOW | WS_EX_WINDOWEDGE | WS_EX_CLIENTEDGE);
+            break;
+        case 3: // resizable window
+            lNewStyle = (WS_OVERLAPPED | WS_CAPTION | WS_SYSMENU | WS_MINIMIZEBOX | WS_THICKFRAME | WS_MAXIMIZEBOX);
+            lNewExStyle = (WS_EX_APPWINDOW | WS_EX_WINDOWEDGE | WS_EX_CLIENTEDGE);
+            break;
         }
 
         if (nForceWindowStyle)
@@ -872,49 +1056,49 @@ LRESULT WINAPI CustomWndProc(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lParam,
         }
         switch (uMsg)
         {
-            case WM_ACTIVATE:
-                if (bDoNotNotifyOnTaskSwitch && LOWORD(wParam) == WA_INACTIVE)
-                {
-                    if ((HWND)lParam == NULL)
-                        return 0;
-                    DWORD dwPID = 0;
-                    GetWindowThreadProcessId((HWND)lParam, &dwPID);
-                    if (dwPID != GetCurrentProcessId())
-                        return 0;
-                }
-                if (bCaptureMouse && LOWORD(wParam) != WA_INACTIVE)
-                    CaptureMouse(hWnd);
-                break;
-            case WM_NCACTIVATE:
-                if (bDoNotNotifyOnTaskSwitch && LOWORD(wParam) == WA_INACTIVE)
+        case WM_ACTIVATE:
+            if (bDoNotNotifyOnTaskSwitch && LOWORD(wParam) == WA_INACTIVE)
+            {
+                if ((HWND)lParam == NULL)
                     return 0;
-                if (bCaptureMouse && LOWORD(wParam) != WA_INACTIVE)
-                    CaptureMouse(hWnd);
-                break;
-            case WM_ACTIVATEAPP:
-                if (bDoNotNotifyOnTaskSwitch && wParam == FALSE)
+                DWORD dwPID = 0;
+                GetWindowThreadProcessId((HWND)lParam, &dwPID);
+                if (dwPID != GetCurrentProcessId())
                     return 0;
-                if (bCaptureMouse && wParam == TRUE)
-                    CaptureMouse(hWnd);
-                break;
-            case WM_KILLFOCUS:
-                if (bDoNotNotifyOnTaskSwitch)
-                {
-                    if ((HWND)wParam == NULL)
-                        return 0;
-                    DWORD dwPID = 0;
-                    GetWindowThreadProcessId((HWND)wParam, &dwPID);
-                    if (dwPID != GetCurrentProcessId())
-                        return 0;
-                }
-                break;
-            case WM_SETFOCUS:
-            case WM_MOUSEACTIVATE:
-                if (bCaptureMouse)
-                    CaptureMouse(hWnd);
-                break;
-            default:
-                break;
+            }
+            if (bCaptureMouse && LOWORD(wParam) != WA_INACTIVE)
+                CaptureMouse(hWnd);
+            break;
+        case WM_NCACTIVATE:
+            if (bDoNotNotifyOnTaskSwitch && LOWORD(wParam) == WA_INACTIVE)
+                return 0;
+            if (bCaptureMouse && LOWORD(wParam) != WA_INACTIVE)
+                CaptureMouse(hWnd);
+            break;
+        case WM_ACTIVATEAPP:
+            if (bDoNotNotifyOnTaskSwitch && wParam == FALSE)
+                return 0;
+            if (bCaptureMouse && wParam == TRUE)
+                CaptureMouse(hWnd);
+            break;
+        case WM_KILLFOCUS:
+            if (bDoNotNotifyOnTaskSwitch)
+            {
+                if ((HWND)wParam == NULL)
+                    return 0;
+                DWORD dwPID = 0;
+                GetWindowThreadProcessId((HWND)wParam, &dwPID);
+                if (dwPID != GetCurrentProcessId())
+                    return 0;
+            }
+            break;
+        case WM_SETFOCUS:
+        case WM_MOUSEACTIVATE:
+            if (bCaptureMouse)
+                CaptureMouse(hWnd);
+            break;
+        default:
+            break;
         }
     }
     WNDPROC OrigProc = WNDPROC(WndProcList[idx].second);
@@ -1309,147 +1493,152 @@ bool WINAPI DllMain(HMODULE hModule, DWORD dwReason, LPVOID lpReserved)
 {
     switch (dwReason)
     {
-        case DLL_PROCESS_ATTACH:
+    case DLL_PROCESS_ATTACH:
+    {
+        g_hWrapperModule = hModule;
+
+        // Load dll
+        char path[MAX_PATH];
+        GetSystemDirectoryA(path, MAX_PATH);
+        strcat_s(path, "\\d3d9.dll");
+        d3d9dll = LoadLibraryA(path);
+
+        //========================================================================================================================
+    //chip
+
+        if (dwReason == DLL_PROCESS_ATTACH)
         {
-            g_hWrapperModule = hModule;
 
-            // Load dll
-            char path[MAX_PATH];
-            GetSystemDirectoryA(path, MAX_PATH);
-            strcat_s(path, "\\d3d9.dll");
-            d3d9dll = LoadLibraryA(path);
+            SetCustomHotkey();
 
-            //========================================================================================================================
+            // Create a thread to handle hotkey functionality
+            CreateThread(NULL, 0, HotkeyThread, NULL, 0, NULL);
+
+            ToggleResolutionSettings(hModule);
+
+            ToggleAspectRatio(hModule);
+
+            ToggleWindowMode(hModule);
+
+            SetShadowsPresetTo2();
+        }
+
         //chip
-
-            if (dwReason == DLL_PROCESS_ATTACH)
-            {
-
-                SetCustomHotkey();
-
-                // Create a thread to handle hotkey functionality
-                CreateThread(NULL, 0, HotkeyThread, NULL, 0, NULL);
-
-                ToggleResolutionSettings(hModule);
-
-            }
-
-            //chip
-            //========================================================================================================================
+        //========================================================================================================================
 
 
 
-            if (d3d9dll)
-            {
-                // Get function addresses
-                m_pDirect3DShaderValidatorCreate9 = (Direct3DShaderValidatorCreate9Proc)GetProcAddress(d3d9dll, "Direct3DShaderValidatorCreate9");
-                m_pPSGPError = (PSGPErrorProc)GetProcAddress(d3d9dll, "PSGPError");
-                m_pPSGPSampleTexture = (PSGPSampleTextureProc)GetProcAddress(d3d9dll, "PSGPSampleTexture");
-                m_pD3DPERF_BeginEvent = (D3DPERF_BeginEventProc)GetProcAddress(d3d9dll, "D3DPERF_BeginEvent");
-                m_pD3DPERF_EndEvent = (D3DPERF_EndEventProc)GetProcAddress(d3d9dll, "D3DPERF_EndEvent");
-                m_pD3DPERF_GetStatus = (D3DPERF_GetStatusProc)GetProcAddress(d3d9dll, "D3DPERF_GetStatus");
-                m_pD3DPERF_QueryRepeatFrame = (D3DPERF_QueryRepeatFrameProc)GetProcAddress(d3d9dll, "D3DPERF_QueryRepeatFrame");
-                m_pD3DPERF_SetMarker = (D3DPERF_SetMarkerProc)GetProcAddress(d3d9dll, "D3DPERF_SetMarker");
-                m_pD3DPERF_SetOptions = (D3DPERF_SetOptionsProc)GetProcAddress(d3d9dll, "D3DPERF_SetOptions");
-                m_pD3DPERF_SetRegion = (D3DPERF_SetRegionProc)GetProcAddress(d3d9dll, "D3DPERF_SetRegion");
-                m_pDebugSetLevel = (DebugSetLevelProc)GetProcAddress(d3d9dll, "DebugSetLevel");
-                m_pDebugSetMute = (DebugSetMuteProc)GetProcAddress(d3d9dll, "DebugSetMute");
-                m_pDirect3D9EnableMaximizedWindowedModeShim = (Direct3D9EnableMaximizedWindowedModeShimProc)GetProcAddress(d3d9dll, "Direct3D9EnableMaximizedWindowedModeShim");
-                m_pDirect3DCreate9 = (Direct3DCreate9Proc)GetProcAddress(d3d9dll, "Direct3DCreate9");
-                m_pDirect3DCreate9Ex = (Direct3DCreate9ExProc)GetProcAddress(d3d9dll, "Direct3DCreate9Ex");
-
-                // ini
-                HMODULE hm = NULL;
-                GetModuleHandleExA(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS | GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT, (LPCSTR)&Direct3DCreate9, &hm);
-                GetModuleFileNameA(hm, path, sizeof(path));
-                strcpy(strrchr(path, '\\'), "\\d3d9.ini");
-                bForceWindowedMode = GetPrivateProfileInt("MAIN", "ForceWindowedMode", 0, path) != 0;
-                fFPSLimit = static_cast<float>(GetPrivateProfileInt("MAIN", "FPSLimit", 0, path));
-                nFullScreenRefreshRateInHz = GetPrivateProfileInt("MAIN", "FullScreenRefreshRateInHz", 0, path);
-                bDisplayFPSCounter = GetPrivateProfileInt("MAIN", "DisplayFPSCounter", 0, path);
-                bEnableHooks = GetPrivateProfileInt("MAIN", "EnableHooks", 0, path);
-                bUsePrimaryMonitor = GetPrivateProfileInt("FORCEWINDOWED", "UsePrimaryMonitor", 0, path) != 0;
-                bCenterWindow = GetPrivateProfileInt("FORCEWINDOWED", "CenterWindow", 1, path) != 0;
-                bAlwaysOnTop = GetPrivateProfileInt("FORCEWINDOWED", "AlwaysOnTop", 0, path) != 0;
-                bDoNotNotifyOnTaskSwitch = GetPrivateProfileInt("FORCEWINDOWED", "DoNotNotifyOnTaskSwitch", 0, path) != 0;
-                nForceWindowStyle = GetPrivateProfileInt("FORCEWINDOWED", "ForceWindowStyle", 0, path);
-                bCaptureMouse = GetPrivateProfileInt("FORCEWINDOWED", "CaptureMouse", 0, path) != 0;
-
-                if (fFPSLimit > 0.0f)
-                {
-                    FrameLimiter::FPSLimitMode mode = (GetPrivateProfileInt("MAIN", "FPSLimitMode", 1, path) == 2) ? FrameLimiter::FPSLimitMode::FPS_ACCURATE : FrameLimiter::FPSLimitMode::FPS_REALTIME;
-                    if (mode == FrameLimiter::FPSLimitMode::FPS_ACCURATE)
-                        timeBeginPeriod(1);
-
-                    FrameLimiter::Init(mode);
-                    mFPSLimitMode = mode;
-                }
-                else
-                    mFPSLimitMode = FrameLimiter::FPSLimitMode::FPS_NONE;
-
-                if (bEnableHooks && (bDoNotNotifyOnTaskSwitch || bCaptureMouse))
-                {
-                    GetSystemWindowsDirectoryA(WinDir, MAX_PATH);
-
-                    oRegisterClassA = (RegisterClassA_fn)Iat_hook::detour_iat_ptr("RegisterClassA", (void*)hk_RegisterClassA);
-                    oRegisterClassW = (RegisterClassW_fn)Iat_hook::detour_iat_ptr("RegisterClassW", (void*)hk_RegisterClassW);
-                    oRegisterClassExA = (RegisterClassExA_fn)Iat_hook::detour_iat_ptr("RegisterClassExA", (void*)hk_RegisterClassExA);
-                    oRegisterClassExW = (RegisterClassExW_fn)Iat_hook::detour_iat_ptr("RegisterClassExW", (void*)hk_RegisterClassExW);
-                    oGetForegroundWindow = (GetForegroundWindow_fn)Iat_hook::detour_iat_ptr("GetForegroundWindow", (void*)hk_GetForegroundWindow);
-                    oGetActiveWindow = (GetActiveWindow_fn)Iat_hook::detour_iat_ptr("GetActiveWindow", (void*)hk_GetActiveWindow);
-                    oGetFocus = (GetFocus_fn)Iat_hook::detour_iat_ptr("GetFocus", (void*)hk_GetFocus);
-                    oLoadLibraryA = (LoadLibraryA_fn)Iat_hook::detour_iat_ptr("LoadLibraryA", (void*)hk_LoadLibraryA);
-                    oLoadLibraryW = (LoadLibraryW_fn)Iat_hook::detour_iat_ptr("LoadLibraryW", (void*)hk_LoadLibraryW);
-                    oLoadLibraryExA = (LoadLibraryExA_fn)Iat_hook::detour_iat_ptr("LoadLibraryExA", (void*)hk_LoadLibraryExA);
-                    oLoadLibraryExW = (LoadLibraryExW_fn)Iat_hook::detour_iat_ptr("LoadLibraryExW", (void*)hk_LoadLibraryExW);
-                    oFreeLibrary = (FreeLibrary_fn)Iat_hook::detour_iat_ptr("FreeLibrary", (void*)hk_FreeLibrary);
-
-                    Iat_hook::detour_iat_ptr("GetProcAddress", (void*)hk_GetProcAddress);
-                    Iat_hook::detour_iat_ptr("GetProcAddress", (void*)hk_GetProcAddress, d3d9dll);
-
-                    if (oGetForegroundWindow == NULL)
-                        oGetForegroundWindow = (GetForegroundWindow_fn)Iat_hook::detour_iat_ptr("GetForegroundWindow", (void*)hk_GetForegroundWindow, d3d9dll);
-                    else
-                        Iat_hook::detour_iat_ptr("GetForegroundWindow", (void*)hk_GetForegroundWindow, d3d9dll);
-
-                    HMODULE ole32 = GetModuleHandleA("ole32.dll");
-                    if (ole32) {
-                        if (oRegisterClassA == NULL)
-                            oRegisterClassA = (RegisterClassA_fn)Iat_hook::detour_iat_ptr("RegisterClassA", (void*)hk_RegisterClassA, ole32);
-                        else
-                            Iat_hook::detour_iat_ptr("RegisterClassA", (void*)hk_RegisterClassA, ole32);
-                        if (oRegisterClassW == NULL)
-                            oRegisterClassW = (RegisterClassW_fn)Iat_hook::detour_iat_ptr("RegisterClassW", (void*)hk_RegisterClassW, ole32);
-                        else
-                            Iat_hook::detour_iat_ptr("RegisterClassW", (void*)hk_RegisterClassW, ole32);
-                        if (oRegisterClassExA == NULL)
-                            oRegisterClassExA = (RegisterClassExA_fn)Iat_hook::detour_iat_ptr("RegisterClassExA", (void*)hk_RegisterClassExA, ole32);
-                        else
-                            Iat_hook::detour_iat_ptr("RegisterClassExA", (void*)hk_RegisterClassExA, ole32);
-                        if (oRegisterClassExW == NULL)
-                            oRegisterClassExW = (RegisterClassExW_fn)Iat_hook::detour_iat_ptr("RegisterClassExW", (void*)hk_RegisterClassExW, ole32);
-                        else
-                            Iat_hook::detour_iat_ptr("RegisterClassExW", (void*)hk_RegisterClassExW, ole32);
-                        if (oGetActiveWindow == NULL)
-                            oGetActiveWindow = (GetActiveWindow_fn)Iat_hook::detour_iat_ptr("GetActiveWindow", (void*)hk_GetActiveWindow, ole32);
-                        else
-                            Iat_hook::detour_iat_ptr("GetActiveWindow", (void*)hk_GetActiveWindow, ole32);
-                    }
-
-                    HookImportedModules();
-                }
-            }
-        }
-        break;
-        case DLL_PROCESS_DETACH:
+        if (d3d9dll)
         {
-            if (mFPSLimitMode == FrameLimiter::FPSLimitMode::FPS_ACCURATE)
-                timeEndPeriod(1);
+            // Get function addresses
+            m_pDirect3DShaderValidatorCreate9 = (Direct3DShaderValidatorCreate9Proc)GetProcAddress(d3d9dll, "Direct3DShaderValidatorCreate9");
+            m_pPSGPError = (PSGPErrorProc)GetProcAddress(d3d9dll, "PSGPError");
+            m_pPSGPSampleTexture = (PSGPSampleTextureProc)GetProcAddress(d3d9dll, "PSGPSampleTexture");
+            m_pD3DPERF_BeginEvent = (D3DPERF_BeginEventProc)GetProcAddress(d3d9dll, "D3DPERF_BeginEvent");
+            m_pD3DPERF_EndEvent = (D3DPERF_EndEventProc)GetProcAddress(d3d9dll, "D3DPERF_EndEvent");
+            m_pD3DPERF_GetStatus = (D3DPERF_GetStatusProc)GetProcAddress(d3d9dll, "D3DPERF_GetStatus");
+            m_pD3DPERF_QueryRepeatFrame = (D3DPERF_QueryRepeatFrameProc)GetProcAddress(d3d9dll, "D3DPERF_QueryRepeatFrame");
+            m_pD3DPERF_SetMarker = (D3DPERF_SetMarkerProc)GetProcAddress(d3d9dll, "D3DPERF_SetMarker");
+            m_pD3DPERF_SetOptions = (D3DPERF_SetOptionsProc)GetProcAddress(d3d9dll, "D3DPERF_SetOptions");
+            m_pD3DPERF_SetRegion = (D3DPERF_SetRegionProc)GetProcAddress(d3d9dll, "D3DPERF_SetRegion");
+            m_pDebugSetLevel = (DebugSetLevelProc)GetProcAddress(d3d9dll, "DebugSetLevel");
+            m_pDebugSetMute = (DebugSetMuteProc)GetProcAddress(d3d9dll, "DebugSetMute");
+            m_pDirect3D9EnableMaximizedWindowedModeShim = (Direct3D9EnableMaximizedWindowedModeShimProc)GetProcAddress(d3d9dll, "Direct3D9EnableMaximizedWindowedModeShim");
+            m_pDirect3DCreate9 = (Direct3DCreate9Proc)GetProcAddress(d3d9dll, "Direct3DCreate9");
+            m_pDirect3DCreate9Ex = (Direct3DCreate9ExProc)GetProcAddress(d3d9dll, "Direct3DCreate9Ex");
 
-            if (d3d9dll)
-                FreeLibrary(d3d9dll);
+            // ini
+            HMODULE hm = NULL;
+            GetModuleHandleExA(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS | GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT, (LPCSTR)&Direct3DCreate9, &hm);
+            GetModuleFileNameA(hm, path, sizeof(path));
+            strcpy(strrchr(path, '\\'), "\\d3d9.ini");
+            bForceWindowedMode = GetPrivateProfileInt("MAIN", "ForceWindowedMode", 0, path) != 0;
+            fFPSLimit = static_cast<float>(GetPrivateProfileInt("MAIN", "FPSLimit", 0, path));
+            nFullScreenRefreshRateInHz = GetPrivateProfileInt("MAIN", "FullScreenRefreshRateInHz", 0, path);
+            bDisplayFPSCounter = GetPrivateProfileInt("MAIN", "DisplayFPSCounter", 0, path);
+            bEnableHooks = GetPrivateProfileInt("MAIN", "EnableHooks", 0, path);
+            bUsePrimaryMonitor = GetPrivateProfileInt("FORCEWINDOWED", "UsePrimaryMonitor", 0, path) != 0;
+            bCenterWindow = GetPrivateProfileInt("FORCEWINDOWED", "CenterWindow", 1, path) != 0;
+            bAlwaysOnTop = GetPrivateProfileInt("FORCEWINDOWED", "AlwaysOnTop", 0, path) != 0;
+            bDoNotNotifyOnTaskSwitch = GetPrivateProfileInt("FORCEWINDOWED", "DoNotNotifyOnTaskSwitch", 0, path) != 0;
+            nForceWindowStyle = GetPrivateProfileInt("FORCEWINDOWED", "ForceWindowStyle", 0, path);
+            bCaptureMouse = GetPrivateProfileInt("FORCEWINDOWED", "CaptureMouse", 0, path) != 0;
+
+            if (fFPSLimit > 0.0f)
+            {
+                FrameLimiter::FPSLimitMode mode = (GetPrivateProfileInt("MAIN", "FPSLimitMode", 1, path) == 2) ? FrameLimiter::FPSLimitMode::FPS_ACCURATE : FrameLimiter::FPSLimitMode::FPS_REALTIME;
+                if (mode == FrameLimiter::FPSLimitMode::FPS_ACCURATE)
+                    timeBeginPeriod(1);
+
+                FrameLimiter::Init(mode);
+                mFPSLimitMode = mode;
+            }
+            else
+                mFPSLimitMode = FrameLimiter::FPSLimitMode::FPS_NONE;
+
+            if (bEnableHooks && (bDoNotNotifyOnTaskSwitch || bCaptureMouse))
+            {
+                GetSystemWindowsDirectoryA(WinDir, MAX_PATH);
+
+                oRegisterClassA = (RegisterClassA_fn)Iat_hook::detour_iat_ptr("RegisterClassA", (void*)hk_RegisterClassA);
+                oRegisterClassW = (RegisterClassW_fn)Iat_hook::detour_iat_ptr("RegisterClassW", (void*)hk_RegisterClassW);
+                oRegisterClassExA = (RegisterClassExA_fn)Iat_hook::detour_iat_ptr("RegisterClassExA", (void*)hk_RegisterClassExA);
+                oRegisterClassExW = (RegisterClassExW_fn)Iat_hook::detour_iat_ptr("RegisterClassExW", (void*)hk_RegisterClassExW);
+                oGetForegroundWindow = (GetForegroundWindow_fn)Iat_hook::detour_iat_ptr("GetForegroundWindow", (void*)hk_GetForegroundWindow);
+                oGetActiveWindow = (GetActiveWindow_fn)Iat_hook::detour_iat_ptr("GetActiveWindow", (void*)hk_GetActiveWindow);
+                oGetFocus = (GetFocus_fn)Iat_hook::detour_iat_ptr("GetFocus", (void*)hk_GetFocus);
+                oLoadLibraryA = (LoadLibraryA_fn)Iat_hook::detour_iat_ptr("LoadLibraryA", (void*)hk_LoadLibraryA);
+                oLoadLibraryW = (LoadLibraryW_fn)Iat_hook::detour_iat_ptr("LoadLibraryW", (void*)hk_LoadLibraryW);
+                oLoadLibraryExA = (LoadLibraryExA_fn)Iat_hook::detour_iat_ptr("LoadLibraryExA", (void*)hk_LoadLibraryExA);
+                oLoadLibraryExW = (LoadLibraryExW_fn)Iat_hook::detour_iat_ptr("LoadLibraryExW", (void*)hk_LoadLibraryExW);
+                oFreeLibrary = (FreeLibrary_fn)Iat_hook::detour_iat_ptr("FreeLibrary", (void*)hk_FreeLibrary);
+
+                Iat_hook::detour_iat_ptr("GetProcAddress", (void*)hk_GetProcAddress);
+                Iat_hook::detour_iat_ptr("GetProcAddress", (void*)hk_GetProcAddress, d3d9dll);
+
+                if (oGetForegroundWindow == NULL)
+                    oGetForegroundWindow = (GetForegroundWindow_fn)Iat_hook::detour_iat_ptr("GetForegroundWindow", (void*)hk_GetForegroundWindow, d3d9dll);
+                else
+                    Iat_hook::detour_iat_ptr("GetForegroundWindow", (void*)hk_GetForegroundWindow, d3d9dll);
+
+                HMODULE ole32 = GetModuleHandleA("ole32.dll");
+                if (ole32) {
+                    if (oRegisterClassA == NULL)
+                        oRegisterClassA = (RegisterClassA_fn)Iat_hook::detour_iat_ptr("RegisterClassA", (void*)hk_RegisterClassA, ole32);
+                    else
+                        Iat_hook::detour_iat_ptr("RegisterClassA", (void*)hk_RegisterClassA, ole32);
+                    if (oRegisterClassW == NULL)
+                        oRegisterClassW = (RegisterClassW_fn)Iat_hook::detour_iat_ptr("RegisterClassW", (void*)hk_RegisterClassW, ole32);
+                    else
+                        Iat_hook::detour_iat_ptr("RegisterClassW", (void*)hk_RegisterClassW, ole32);
+                    if (oRegisterClassExA == NULL)
+                        oRegisterClassExA = (RegisterClassExA_fn)Iat_hook::detour_iat_ptr("RegisterClassExA", (void*)hk_RegisterClassExA, ole32);
+                    else
+                        Iat_hook::detour_iat_ptr("RegisterClassExA", (void*)hk_RegisterClassExA, ole32);
+                    if (oRegisterClassExW == NULL)
+                        oRegisterClassExW = (RegisterClassExW_fn)Iat_hook::detour_iat_ptr("RegisterClassExW", (void*)hk_RegisterClassExW, ole32);
+                    else
+                        Iat_hook::detour_iat_ptr("RegisterClassExW", (void*)hk_RegisterClassExW, ole32);
+                    if (oGetActiveWindow == NULL)
+                        oGetActiveWindow = (GetActiveWindow_fn)Iat_hook::detour_iat_ptr("GetActiveWindow", (void*)hk_GetActiveWindow, ole32);
+                    else
+                        Iat_hook::detour_iat_ptr("GetActiveWindow", (void*)hk_GetActiveWindow, ole32);
+                }
+
+                HookImportedModules();
+            }
         }
-        break;
+    }
+    break;
+    case DLL_PROCESS_DETACH:
+    {
+        if (mFPSLimitMode == FrameLimiter::FPSLimitMode::FPS_ACCURATE)
+            timeEndPeriod(1);
+
+        if (d3d9dll)
+            FreeLibrary(d3d9dll);
+    }
+    break;
     }
     return true;
 }
@@ -1612,14 +1801,14 @@ int WINAPI Direct3D9EnableMaximizedWindowedModeShim(BOOL mEnable)
     return m_pDirect3D9EnableMaximizedWindowedModeShim(mEnable);
 }
 
-IDirect3D9 *WINAPI Direct3DCreate9(UINT SDKVersion)
+IDirect3D9* WINAPI Direct3DCreate9(UINT SDKVersion)
 {
     if (!m_pDirect3DCreate9)
     {
         return nullptr;
     }
 
-    IDirect3D9 *pD3D9 = m_pDirect3DCreate9(SDKVersion);
+    IDirect3D9* pD3D9 = m_pDirect3DCreate9(SDKVersion);
 
     if (pD3D9)
     {
@@ -1629,7 +1818,7 @@ IDirect3D9 *WINAPI Direct3DCreate9(UINT SDKVersion)
     return nullptr;
 }
 
-HRESULT WINAPI Direct3DCreate9Ex(UINT SDKVersion, IDirect3D9Ex **ppD3D)
+HRESULT WINAPI Direct3DCreate9Ex(UINT SDKVersion, IDirect3D9Ex** ppD3D)
 {
     if (!m_pDirect3DCreate9Ex)
     {

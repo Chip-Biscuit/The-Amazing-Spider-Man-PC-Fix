@@ -315,7 +315,10 @@ HRESULT m_IDirect3DDevice9Ex::SetIndices(THIS_ IDirect3DIndexBuffer9* pIndexData
 
 UINT m_IDirect3DDevice9Ex::GetAvailableTextureMem()
 {
-	return ProxyInterface->GetAvailableTextureMem();
+	// pretend ~1024 MiB (adjust to what you want)
+	const DWORD fakeMB = 1024;
+	const ULONGLONG bytes = (ULONGLONG)fakeMB * 1024ULL * 1024ULL;
+	return (bytes > 0xFFFFFFFFULL) ? 0xFFFFFFFFu : (DWORD)bytes;
 }
 
 HRESULT m_IDirect3DDevice9Ex::GetCreationParameters(D3DDEVICE_CREATION_PARAMETERS *pParameters)
@@ -328,17 +331,13 @@ HRESULT m_IDirect3DDevice9Ex::GetDeviceCaps(D3DCAPS9 *pCaps)
 	return ProxyInterface->GetDeviceCaps(pCaps);
 }
 
-HRESULT m_IDirect3DDevice9Ex::GetDirect3D(IDirect3D9 **ppD3D9)
+// make sure this is the implementation you ship
+STDMETHODIMP m_IDirect3DDevice9Ex::GetDirect3D(IDirect3D9** ppD3D9)
 {
-	if (ppD3D9)
-	{
-		m_pD3DEx->AddRef();
-
-		*ppD3D9 = m_pD3DEx;
-
-		return D3D_OK;
-	}
-	return D3DERR_INVALIDCALL;
+	if (!ppD3D9) return D3DERR_INVALIDCALL;
+	*ppD3D9 = (IDirect3D9*)m_pD3DEx;  // return your wrapper, not ProxyInterface
+	m_pD3DEx->AddRef();
+	return D3D_OK;
 }
 
 HRESULT m_IDirect3DDevice9Ex::GetRasterStatus(THIS_ UINT iSwapChain, D3DRASTER_STATUS* pRasterStatus)

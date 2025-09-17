@@ -15,6 +15,15 @@
 */
 
 #include "d3d9.h"
+// remove 'static' from these so they have external linkage:
+bool  gGpuBannerInit = false;
+char  gGpuBanner[256] = "GPU: (pending)";
+
+// small accessor you can call from your FPS draw
+extern "C" const char* D3D9Spoof_GetBanner()
+{
+    return gGpuBannerInit ? gGpuBanner : "GPU: (pending)";
+}
 
 HRESULT m_IDirect3D9Ex::QueryInterface(REFIID riid, void** ppvObj)
 {
@@ -62,10 +71,28 @@ HRESULT m_IDirect3D9Ex::GetAdapterDisplayMode(UINT Adapter, D3DDISPLAYMODE *pMod
 	return ProxyInterface->GetAdapterDisplayMode(Adapter, pMode);
 }
 
-HRESULT m_IDirect3D9Ex::GetAdapterIdentifier(UINT Adapter, DWORD Flags, D3DADAPTER_IDENTIFIER9 *pIdentifier)
+HRESULT m_IDirect3D9Ex::GetAdapterIdentifier(UINT Adapter, DWORD Flags, D3DADAPTER_IDENTIFIER9* pIdentifier)
 {
-	return ProxyInterface->GetAdapterIdentifier(Adapter, Flags, pIdentifier);
+    // Call the real D3D9 to populate the structure first
+    HRESULT hr = ProxyInterface->GetAdapterIdentifier(Adapter, Flags, pIdentifier);
+    if (FAILED(hr) || !pIdentifier) return hr;
+
+    // --- Spoof as NVIDIA GeForce GTX 460 (GF104) ---
+    pIdentifier->VendorId = 0x10DE;   // NVIDIA
+    pIdentifier->DeviceId = 0x0E22;   // GTX 460
+    pIdentifier->SubSysId = 0x00000000;
+    pIdentifier->Revision = 0x00;
+
+    // Strings (truncate-safe)
+    strncpy_s(pIdentifier->Driver, "nvd3dum.dll", _TRUNCATE);
+    strncpy_s(pIdentifier->Description, "NVIDIA GeForce GTX 460", _TRUNCATE);
+    strncpy_s(pIdentifier->DeviceName, "DISPLAY", _TRUNCATE);
+
+   
+
+    return hr;
 }
+
 
 UINT m_IDirect3D9Ex::GetAdapterModeCount(THIS_ UINT Adapter, D3DFORMAT Format)
 {
