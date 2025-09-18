@@ -1,7 +1,7 @@
 [![DX Version](https://img.shields.io/badge/DirectX-9-informational)](#f)
 [![Platform](https://img.shields.io/badge/Windows-x86-blue)](#f)
 [![Config](https://img.shields.io/badge/Config-INI-success)](#f)
-[![Resolution](https://img.shields.io/badge/Resolution-1080p–4K%2B-brightgreen?style=flat)](#resolution)
+[![Resolution](https://img.shields.io/badge/Resolution-1080p–4K%2B-brightgreen?style=flat)](#Resolution/Aspect Ratio)
 [![FOV](https://img.shields.io/badge/FOV-Configurable-blue?style=flat)](#fov)
 [![PCGamingWiki – Essential improvements](https://img.shields.io/badge/PCGamingWiki-FIX-0066cc?style=flat&logo=pcgamingwiki&logoColor=white)](https://www.pcgamingwiki.com/wiki/The_Amazing_Spider-Man_(2012))
 
