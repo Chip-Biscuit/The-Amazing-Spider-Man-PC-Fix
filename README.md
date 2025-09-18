@@ -1,9 +1,10 @@
 [![DX Version](https://img.shields.io/badge/DirectX-9-informational?style=flat)](#features)
 [![Platform](https://img.shields.io/badge/Windows-x86-blue?style=flat)](#platform)
 [![Config](https://img.shields.io/badge/Config-INI-success?style=flat)](#configuration)
-[![Resolution + Aspect Ratio](https://img.shields.io/badge/Resolution%20%2B%20Aspect%20Ratio-1080p-4K%2B-brightgreen?style=flat)](#resolution-aspect-ratio)
+[![Resolution | Aspect Ratio](https://img.shields.io/badge/Resolution-1080p%20%7C%204K%2B-brightgreen?style=flat)](#resolution-aspect-ratio)
 [![FOV](https://img.shields.io/badge/FOV-Configurable-blue?style=flat)](#fov)
 [![PCGamingWiki - Essential improvements](https://img.shields.io/badge/PCGamingWiki-Essential--improvements-0066cc?style=flat&logo=pcgamingwiki&logoColor=white)](https://www.pcgamingwiki.com/wiki/The_Amazing_Spider-Man_(2012))
+
 
 
 # The-Amazing-Spider-Man-PC-Fix
@@ -15,6 +16,7 @@
 Go to releases and download the latest The Amazing Spider-Man fix of either TheAmazingSpiderManFix.zip or TheAmazingSpiderManSteamFix.zip, extract the d3d9.dll and d3d9.ini files into your game folder next to the Game.exe file and you are good to go! You can edit the settings you wish to use in the d3d9.ini file. If a Steam user, you will also have a VideoDetection.dll file which you need to extract into your game folder and (back up always somewhere else) replace the VideoDetection.dll file already in there.
 <br><br>
 
+<a name="resolution-aspect-ratio"></a>
 # Resolution/Aspect-Ratio
 
 The default for resolution is set to (1920 x 1080) in the d3d9.ini file. Put the resolution that you wish to use in both the Width and Height area.
