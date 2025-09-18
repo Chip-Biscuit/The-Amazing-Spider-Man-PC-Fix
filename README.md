@@ -10,7 +10,8 @@
 
 # The-Amazing-Spider-Man-PC-Fix
 
-![ezgif com-animated-gif-maker](https://github.com/user-attachments/assets/1e25daed-7274-4dba-87c0-0dca2efe4823)
+![ezgif com-animated-gif-maker (3)](https://github.com/user-attachments/assets/27d3b77d-c3e9-418a-907b-dab57bcb2444)
+
 
 # Instructions
 
